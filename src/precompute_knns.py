@@ -36,16 +36,31 @@ def my_app(cfg: DictConfig) -> None:
     print(data_dir)
     print(cfg.output_root)
 
-    image_sets = ["val", "train"]
-    dataset_names = ["cocostuff27", "cityscapes", "potsdam"]
-    crop_types = ["five", None]
+    # image_sets = ["val", "train"]
+    # dataset_names = ["cocostuff27", "cityscapes", "potsdam"]
+    # crop_types = ["five", None]
 
     # Uncomment these lines to run on custom datasets
-    #dataset_names = ["directory"]
-    #crop_types = [None]
+    # dataset_names = ["directory"]
+    # crop_types = [None]
+    # image_sets = ["val", "train"]
+    # dataset_names = ["directory"]
+    # crop_types = ["five"]
+    # crop_ratios = [.1]
 
-    res = 224
-    n_batches = 16
+    dataset_names = [cfg.dataset_name]
+    image_sets = ["train", "val"]
+    crop_types = [cfg.crop_type]
+    crop_ratios = [cfg.crop_ratio]
+
+    print('Dataset parameters')
+    print('dataset_names {}'.format(dataset_names))
+    print('image_sets: {} (HARD CODED IN SCRIPT)'.format(image_sets))
+    print('crop_types: {}'.format(crop_types))
+    print('crop_ratios: {}'.format(crop_ratios))
+
+    res = cfg.res
+    n_batches = cfg.batch_size
 
     if cfg.arch == "dino":
         from modules import DinoFeaturizer, LambdaLayer
@@ -62,12 +77,13 @@ def my_app(cfg: DictConfig) -> None:
         for image_set in image_sets:
             for dataset_name in dataset_names:
                 nice_dataset_name = cfg.dir_dataset_name if dataset_name == "directory" else dataset_name
-
+                print("nice_dataset_name: {}".format(nice_dataset_name))
                 feature_cache_file = join(pytorch_data_dir, "nns", "nns_{}_{}_{}_{}_{}.npz".format(
                     cfg.model_type, nice_dataset_name, image_set, crop_type, res))
 
                 if not os.path.exists(feature_cache_file):
                     print("{} not found, computing".format(feature_cache_file))
+                    print('Creating ContrastiveSegDataset')
                     dataset = ContrastiveSegDataset(
                         pytorch_data_dir=pytorch_data_dir,
                         dataset_name=dataset_name,
@@ -78,9 +94,12 @@ def my_app(cfg: DictConfig) -> None:
                         cfg=cfg,
                     )
 
-                    loader = DataLoader(dataset, 256, shuffle=False, num_workers=cfg.num_workers, pin_memory=False)
-
+                    print('Creating Dataloader for ContrastiveSegDataset')
+                    
+                    loader = DataLoader(dataset, cfg.batch_size, shuffle=False, num_workers=cfg.num_workers, pin_memory=False)
+                    print('DataLoader has len {}'.format(len(loader)))
                     with torch.no_grad():
+                        print('Getting normed_feats')
                         normed_feats = get_feats(par_model, loader)
                         all_nns = []
                         step = normed_feats.shape[0] // n_batches
@@ -92,7 +111,7 @@ def my_app(cfg: DictConfig) -> None:
                             all_nns.append(torch.topk(pairwise_sims, 30)[1])
                             del pairwise_sims
                         nearest_neighbors = torch.cat(all_nns, dim=0)
-
+                        print(nearest_neighbors)
                         np.savez_compressed(feature_cache_file, nns=nearest_neighbors.numpy())
                         print("Saved NNs", cfg.model_type, nice_dataset_name, image_set)
 
